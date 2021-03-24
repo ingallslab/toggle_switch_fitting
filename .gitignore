@@ -1,0 +1,33 @@
+#DEV ENVIRONMENT
+#mac OSX
+.DS_Store
+#pyenv settings
+.python-version
+#VS code settings
+/.vscode
+.ipynb_checkpoints
+
+#RELEASE
+#build files from packaging
+/build
+#distribution files from packaging
+/dist
+
+#DEVELOPMENT
+#pip editable install files
+/nloed.egg-info
+#bytecode from importing and running lib
+/nloed/__pycache__
+/tests/__pycache__
+/examples/__pycache__
+/examples/*/__pycache__
+#ignore pytest
+/.pytest_cache
+#ignore tox 
+/.tox/*
+/.tox
+#igrore notebooks files
+/examples/.ipynb_checkpoints
+/examples/*/.ipynb_checkpoints
+
+
