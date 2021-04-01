@@ -338,8 +338,8 @@ def loglike(param_all, dataset, lamb):
             covar = lna_covariance(means[0][0],means[0][1],row['atc'],row['iptg'],param,lamb,size)
             #if a single stable points add the log pdf of the data to the loglikelihood accumulation
             #function
-            ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
-                 - size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
+            ll = ll + np.log(row['num']*size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - row['num']*size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
             #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[0], np.diagflat((0.1*means[0])**2))/row['num'])
         else:
             #if there are 2 stable points, check overnight condition
@@ -347,15 +347,15 @@ def loglike(param_all, dataset, lamb):
                 #compute the LNA covariance matrix around the mean on the lower branch
                 covar = lna_covariance(means[0][0],means[0][1],row['atc'],row['iptg'],param,lamb,size)
                 #if iptg overnight, compute log-pdf value of data around lower rfp stable point
-                ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
-                 - size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
+                ll = ll + np.log(row['num']*size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - row['num']*size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
                 #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[0], np.diagflat((0.1*means[0])**2))/row['num'])
             else:
                 #compute the LNA covariance matrix around the mean on the upper branch
                 covar = lna_covariance(means[1][0],means[1][1],row['atc'],row['iptg'],param,lamb,size)
                 #if atc overnight, compute log-pdf value of data around upper rfp stable point
-                ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
-                 - size*(row[['rfp','gfp']].to_numpy()-means[1])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[1]).T
+                ll = ll + np.log(row['num']*size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - row['num']*size*(row[['rfp','gfp']].to_numpy()-means[1])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[1]).T
                 #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[1], np.diagflat((0.1*means[1])**2))/row['num'])
 
     #return the accumulated loglikelihood, this value needs to be maximized
@@ -444,7 +444,7 @@ atc_max=45
 endpoints =np.array([[atc_max,iptg_min],[atc_min,iptg_max]])
 
 # generate a batched dataset
-dataset_batch = generate_data(u_list, endpoints, param, batch =True)
+dataset_batch = generate_data(u_list, endpoints, param, batch =True, lna=True)
 # generate a single cell dataset
 dataset_cell = generate_data(u_list, endpoints, param, batch =False,lna=True)
 
