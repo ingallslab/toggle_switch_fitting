@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import scipy.optimize as opt
 import scipy.stats as st
+import scipy.linalg as ln
 import matplotlib.pyplot as plt
 
 def rfp_roots(atc,iptg,param):
@@ -150,7 +151,42 @@ def stable_points(atc,iptg,par):
         return 0
 
 
-def generate_data(u_list, endpoints, param, batch=True):
+def lna_covariance(rfp,gfp,atc,iptg,par,lamb,size):
+    '''
+    This function estimates the covariance matrix of the rfp and gfp measurments taken at a specific
+    point using the LNA approximation.
+
+    This covariance matrix is not scaled by the system size by default, the user must do this to
+    the result i.e. cov/size
+
+    This function computes the covariance of a single celled observation. If many single-celled 
+    observations are taken at the same input point, the covariance matrix entries will be smaller 
+    for the mean of the observations than for the individual values (law of large numbers).
+    The covariance matrix for a given single celled observation (as computed here) can be scaled by the
+     number of observations taken to get the covariance matrix for the mean.
+    '''
+    #define the steady-state functions for each species
+    rfp_func = lambda gfp,atc: param[0] + param[1]/(1+((gfp/param[2])*(1/(1+(atc/param[3])**2.0)))**2.0)
+    gfp_func = lambda rfp,iptg: param[4] + param[5]/(1+((rfp/param[6])*(1/(1+(iptg/param[7])**2.0)))**2.0)
+    #define the derivatives of the steady state-functions w.r.t. the opposite species
+    rfp_d_gfp = lambda gfp,atc: -2*param[1]*gfp*((1/param[2])*(1/(1+(atc/param[3])**2.0)))**2.0 \
+                                    /(1+(gfp**2)*((1/param[2])*(1/(1+(atc/param[3])**2.0)))**2.0)
+    gfp_d_rfp = lambda rfp,iptg: -2*param[5]*rfp*((1/param[6])*(1/(1+(iptg/param[7])**2.0)))**2.0 \
+                                    /(1+(rfp**2)*((1/param[6])*(1/(1+(iptg/param[7])**2.0)))**2.0)
+
+    #compute the A (damping) matrix
+    A = np.array([[-lamb, lamb*rfp_d_gfp(gfp,atc)],[lamb*gfp_d_rfp(rfp,iptg),-lamb]])
+    #compute the B (fluctuation) matrix
+    B = np.array([[lamb*(rfp_func(gfp,atc)+rfp),0],[0,lamb*(gfp_d_rfp(rfp,iptg)+gfp)]])
+
+    #solve the sylvester/lyapunov equation (this may be ill-conditioned near where a branch 
+    # disappears i.e. a bifurcation point
+    C = ln.solve_continuous_lyapunov(A,-B)
+
+    return C
+    
+
+def generate_data(u_list, endpoints, param, batch=True, lna=False,lamb=1,size=1):
     '''
     This function generates simulated data for the model. This can be used to evaluate fitting and
     check how we expect the fitting algorithm to perform.
@@ -208,16 +244,28 @@ def generate_data(u_list, endpoints, param, batch=True):
 
         #check if 1 or 2 stable points
         if len(points)==1:
+            if lna:
+                cov = lna_covariance(points[0][0],points[0][1],inputs[0],inputs[1],param,lamb,size)/size
+            else:
+                cov = np.diagflat((0.1*points[0])**2)
             #if 1 point,  generate the approriate number of rfp,gfp observations
-            obs = np.random.multivariate_normal(points[0],np.diagflat((0.1*points[0])**2),u[2])
+            obs = np.random.multivariate_normal(points[0],cov,u[2])
         elif len(points)==2:
             #if 2 points, check which overnight was used
             if not u[1]:
+                if lna:
+                    cov = lna_covariance(points[0][0],points[0][1],inputs[0],inputs[1],param,lamb,size)/size
+                else:
+                    cov = np.diagflat((0.1*points[0])**2)
                 #generated observations arround lower rfp branch if IPTG overnight was used
-                obs = np.random.multivariate_normal(points[0],np.diagflat((0.1*points[0])**2),u[2])
+                obs = np.random.multivariate_normal(points[0],cov,u[2])
             else:
+                if lna:
+                    cov = lna_covariance(points[1][0],points[1][1],inputs[0],inputs[1],param,lamb,size)/size
+                else:
+                    cov = np.diagflat((0.1*points[1])**2)
                 #generated observations arround upper rfp branch if ATC overnight was used
-                obs = np.random.multivariate_normal(points[1],np.diagflat((0.1*points[1])**2),u[2])
+                obs = np.random.multivariate_normal(points[1],cov,u[2])
 
         #check if data is batched or single cell
         if batch:
@@ -261,7 +309,7 @@ def generate_data(u_list, endpoints, param, batch=True):
     return dataset
 
 
-def loglike(param, dataset):
+def loglike(param_all, dataset, lamb):
     '''
     This function computes the loglikelihood for the model with the given parameter values on the
     passed dataset (formated as a pandas array, like in the data generating function)
@@ -271,6 +319,9 @@ def loglike(param, dataset):
     This function can be used, in conjunction with an numpy optimization function, to fit the model
     '''
     
+    param = param_all[:-1]
+    size = np.exp(param_all[-1])
+
     #create a accumulator variable for the loglikelihood and set the value to zero
     ll=0
 
@@ -279,21 +330,33 @@ def loglike(param, dataset):
 
         #for the current row's input conditions, compute the expected stable points (rfp,gfp) with
         #passed parameters
-        points = stable_points(row['atc'],row['iptg'],param)
+        means = stable_points(row['atc'],row['iptg'],param)
 
         #check if current input points, with passed parameters has 1 or 2 stable points
-        if len(points)==1:
+        if len(means)==1:
+            #compute the LNA covariance matrix around the single mean point
+            covar = lna_covariance(means[0][0],means[0][1],row['atc'],row['iptg'],param,lamb,size)
             #if a single stable points add the log pdf of the data to the loglikelihood accumulation
             #function
-            ll = ll + np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], points[0], np.diagflat((0.1*points[0])**2))/row['num'])
+            ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
+            #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[0], np.diagflat((0.1*means[0])**2))/row['num'])
         else:
             #if there are 2 stable points, check overnight condition
             if not row['branch']:
+                #compute the LNA covariance matrix around the mean on the lower branch
+                covar = lna_covariance(means[0][0],means[0][1],row['atc'],row['iptg'],param,lamb,size)
                 #if iptg overnight, compute log-pdf value of data around lower rfp stable point
-                ll = ll + np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], points[0], np.diagflat((0.1*points[0])**2))/row['num'])
+                ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - size*(row[['rfp','gfp']].to_numpy()-means[0])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[0]).T
+                #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[0], np.diagflat((0.1*means[0])**2))/row['num'])
             else:
+                #compute the LNA covariance matrix around the mean on the upper branch
+                covar = lna_covariance(means[1][0],means[1][1],row['atc'],row['iptg'],param,lamb,size)
                 #if atc overnight, compute log-pdf value of data around upper rfp stable point
-                ll = ll + np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], points[1], np.diagflat((0.1*points[1])**2))/row['num'])
+                ll = ll + np.log(size) - 0.5*np.log(np.linalg.det(covar)) \
+                 - size*(row[['rfp','gfp']].to_numpy()-means[1])@np.linalg.inv(covar)@(row[['rfp','gfp']].to_numpy()-means[1]).T
+                #np.log(st.multivariate_normal.pdf([row['rfp'],row['gfp']], means[1], np.diagflat((0.1*means[1])**2))/row['num'])
 
     #return the accumulated loglikelihood, this value needs to be maximized
     return ll
@@ -383,7 +446,7 @@ endpoints =np.array([[atc_max,iptg_min],[atc_min,iptg_max]])
 # generate a batched dataset
 dataset_batch = generate_data(u_list, endpoints, param, batch =True)
 # generate a single cell dataset
-dataset_cell = generate_data(u_list, endpoints, param, batch =False)
+dataset_cell = generate_data(u_list, endpoints, param, batch =False,lna=True)
 
 #load in the real data (batched), rescale atc % to 0-1
 real_batch_data = pd.read_csv('DataFrame_2_March_23',index_col=0)
@@ -392,32 +455,34 @@ real_batch_data['perc']=real_batch_data['perc']/100
 real_cell_data = pd.read_csv('DataFrame_1_March_23',index_col=0)
 real_cell_data['perc']=real_cell_data['perc']/100
 
-# test out the loglikelihood and sum of squared error functions, just to test
-ll = loglike(param, dataset_batch)
+#add the system size to the parameters
+param_all = np.append(param,[0])
+# test out the loglikelihood and sum of squared error functions, just to test, use lamb=1
+ll = loglike(param_all, dataset_batch, 1)
 sse = squared_error(param, dataset_batch)
 
-#create an anonymous function for the sum of squared error of the simulated dataset
-s_error = lambda p: squared_error(p,dataset_batch)
-#choose some initial parameters, the most basic test is to set the to the "true" values used
-# to generate the data. Fitting should converge for this condition, with fitting error only due to 
-#observation randomness. Next step is add some random perturbations (commented out)
-param_start = param #+ np.random.multivariate_normal(param,np.diagflat((0.01*param)**2))
+# #create an anonymous function for the sum of squared error of the simulated dataset
+# s_error = lambda p: squared_error(p,dataset_batch)
+# #choose some initial parameters, the most basic test is to set the to the "true" values used
+# # to generate the data. Fitting should converge for this condition, with fitting error only due to 
+# #observation randomness. Next step is add some random perturbations (commented out)
+# param_start = param #+ np.random.multivariate_normal(param,np.diagflat((0.01*param)**2))
 
-#use the optimization function in scipy to generate an estimate
-#i use nelder-mead because it doesn't need any derivatives and works reasonably on non-smooth functions
-#our current loglik/sse is non-smooth because of the bifurcation points
-est2=opt.minimize(s_error, param_start, method='Nelder-Mead', tol=1e-6)
+# #use the optimization function in scipy to generate an estimate
+# #i use nelder-mead because it doesn't need any derivatives and works reasonably on non-smooth functions
+# #our current loglik/sse is non-smooth because of the bifurcation points
+# est2=opt.minimize(s_error, param_start, method='Nelder-Mead', tol=1e-6)
 
 #create an anonymous function for the negative loglikelihood of the simulated dataset
 #(negative because we will minimize instead of maximizing)
-neg_log_lik = lambda p: -loglike(p,dataset_batch)
+neg_log_lik = lambda p: -loglike(p,dataset_batch,1)
 #set initial parameter value, from which optimization starts (setting it to truth is pretty much
 # cheating, only good for numerical testing)
-param_start = param #+ np.random.multivariate_normal(param,np.diagflat((0.01*param)**2))
+param_start = param_all #+ np.random.multivariate_normal(param,np.diagflat((0.01*param)**2))
 
 #use the optimization function in scipy to generate an estimate
 #this is currently giving some numerical problems, sse may be more stable
-#est1=opt.minimize(neg_log_lik, param_start, method='Nelder-Mead', tol=1e-6)
+est1=opt.minimize(neg_log_lik, param_start, method='Nelder-Mead', tol=1e-6)
 
 #example plotting of rfp/gfp ratio
 plt.plot(dataset_batch['perc'], np.log(dataset_batch['rfp']/dataset_batch['gfp']),'r+')
