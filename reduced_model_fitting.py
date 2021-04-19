@@ -170,12 +170,12 @@ def log_ratio_points(atc,iptg,par_all):
     if len(rfp)==1:
         #compute gfp level for a single root, compute ratio*theta and return
         gfp = promoter_model(rfp[0],iptg,gfp_par)
-        return [theta*rfp[0]/gfp]
+        return [np.log(theta*rfp[0]/gfp)]
     elif len(rfp)==3:
         #compute gfp level for smallest and largest roots, compute ratio*theta and return
         gfp_low = promoter_model(rfp[0],iptg,gfp_par)
         gfp_high = promoter_model(rfp[2],iptg,gfp_par)
-        return [theta*rfp[0]/gfp_low, theta*rfp[2]/gfp_high]
+        return [np.log(theta*rfp[0]/gfp_low), np.log(theta*rfp[2]/gfp_high)]
     else:
         #should never get here
         return 0

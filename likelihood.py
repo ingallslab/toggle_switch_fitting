@@ -448,6 +448,10 @@ dataset_batch = generate_data(u_list, endpoints, param, batch =True, lna=True)
 # generate a single cell dataset
 dataset_cell = generate_data(u_list, endpoints, param, batch =False,lna=True)
 
+#example plotting of rfp/gfp ratio
+plt.plot(dataset_batch['perc'], np.log(dataset_batch['rfp']/dataset_batch['gfp']),'r+')
+plt.show()
+
 #load in the real data (batched), rescale atc % to 0-1
 real_batch_data = pd.read_csv('DataFrame_2_March_23',index_col=0)
 real_batch_data['perc']=real_batch_data['perc']/100
@@ -484,6 +488,4 @@ param_start = param_all #+ np.random.multivariate_normal(param,np.diagflat((0.01
 #this is currently giving some numerical problems, sse may be more stable
 est1=opt.minimize(neg_log_lik, param_start, method='Nelder-Mead', tol=1e-6)
 
-#example plotting of rfp/gfp ratio
-plt.plot(dataset_batch['perc'], np.log(dataset_batch['rfp']/dataset_batch['gfp']),'r+')
-plt.show()
+
